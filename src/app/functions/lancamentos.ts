@@ -55,18 +55,29 @@ export function normalizarNaturezaRateio(
 }
 
 // Achata os rateios SELECIONADOS de cada lançamento numa lista de LinhaOrigem
-// (uma por rateio) — chamado em OrigemComponent.avancarEtapa(). `lancamento`
-// (chave única por linha, usada por montarComparativo/LinhaDestino) é
-// sintetizado como `${numLct}-${índice do rateio}`; `numLct` (chave de
-// AGRUPAMENTO — vários rateios do mesmo lançamento compartilham) é o número
-// do lançamento em si. Confirmado pelo cliente em 2026-08-26: todos os
-// rateios selecionados de um mesmo lançamento vão pro mesmo destino, ver
-// DestinoComponent.gruposMultiplo.
+// (uma por rateio DE CRÉDITO) — chamado em OrigemComponent.avancarEtapa().
+// `lancamento` (chave única por linha, usada por montarComparativo/
+// LinhaDestino) é sintetizado como `${numLct}-${índice do rateio}`; `numLct`
+// (chave de AGRUPAMENTO — vários rateios do mesmo lançamento compartilham) é
+// o número do lançamento em si.
+//
+// Só rateios de CRÉDITO virão como linha de Origem — confirmado pelo usuário
+// em 2026-10-14: o rateio de Débito de um lançamento é sempre o lado que
+// "desconta"/estorna a origem (automático, via o próprio estorno gerado pra
+// cada Crédito em `montarParDeRateios`, functions/integracao-erp.ts), nunca
+// precisa de um destino escolhido nem aparece como linha própria de
+// aprovação. Antes disso, CADA rateio (Débito ou Crédito) virava sua própria
+// linha de Origem pedindo destino — é isso que gerava, por exemplo, um
+// lançamento com 1 Débito + 1 Crédito aparecendo como "2 destinos" na tela,
+// e further down na integração.
 export function achatarRateiosSelecionados(lancamentos: LancamentoLinha[]): LinhaOrigem[] {
   const linhas: LinhaOrigem[] = [];
   lancamentos.forEach((lct) => {
     lct.rateios.forEach((rateio, indice) => {
       if (!rateio.selecionado) {
+        return;
+      }
+      if (normalizarNaturezaRateio(rateio.debCre) !== 'Credito') {
         return;
       }
       linhas.push({

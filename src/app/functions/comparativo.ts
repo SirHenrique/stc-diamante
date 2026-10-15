@@ -9,17 +9,43 @@ export interface LinhaComparativo {
   destino?: LinhaDestino;
 }
 
+// Casa cada Origem com TODOS os destinos de mesmo `lancamento` — não só o
+// primeiro. Alterado em 2026-10-14 pra suportar o split de 1 crédito em N
+// destinos no Por Lote (`DestinoComponent`, modo Múltiplo): em vez de
+// duplicar/mutar a linha de Origem (como o Manual faz, com chaves
+// sintéticas por fatia), o Destino pode gerar N `LinhaDestino` com o MESMO
+// `lancamento` da origem — cada um vira sua própria linha de comparativo,
+// com a MESMA origem (mesma conta/CC/natureza) e o valor da fatia (via
+// `destino.valor` em `montarParDeRateios`, functions/integracao-erp.ts).
+// Quando há só 1 destino por origem (todo o resto do app: Manual, Por Lote
+// Único, Por Lote Múltiplo sem split) o comportamento é idêntico ao de
+// antes — só quando há split (N>1) é que aparece mais de 1 linha pra mesma
+// origem, com `lancamento` desambiguado (sufixo "/1", "/2"...) só pra manter
+// único no `dataKey` das tabelas (Aprovação/Resumo/Impressão).
 export function montarComparativo(
   dados: LinhaOrigem[] | any,
   linhasDestino: LinhaDestino[] | any
 ): LinhaComparativo[] {
   const origens: LinhaOrigem[] = Array.isArray(dados) ? dados : [];
   const destinos: LinhaDestino[] = Array.isArray(linhasDestino) ? linhasDestino : [];
-  return origens.map((origem) => ({
-    lancamento: origem.lancamento,
-    origem,
-    destino: destinos.find((d) => d.lancamento === origem.lancamento),
-  }));
+  const linhas: LinhaComparativo[] = [];
+
+  origens.forEach((origem) => {
+    const correspondentes = destinos.filter((d) => d.lancamento === origem.lancamento);
+    if (!correspondentes.length) {
+      linhas.push({ lancamento: origem.lancamento, origem, destino: undefined });
+      return;
+    }
+    correspondentes.forEach((destino, i) => {
+      linhas.push({
+        lancamento: correspondentes.length > 1 ? `${origem.lancamento}/${i + 1}` : origem.lancamento,
+        origem,
+        destino,
+      });
+    });
+  });
+
+  return linhas;
 }
 
 // REESCRITA em 2026-08-31 — cada linha soma IGUAL pro Débito Total e pro

@@ -17,6 +17,13 @@ import { extrairLista } from '../functions/extrair-lista';
 import { montarHistoricoDestino } from '../functions/regra-destino';
 import { gestoresDistintos } from '../functions/loop-gestor';
 
+// 1 grupo por linha de Origem (rateio de Crédito real) — ver
+// DestinoComponent.gruposDestino.
+interface GrupoDestino {
+  origem: LinhaOrigem;
+  destinos: LinhaDestino[];
+}
+
 @Component({
   selector: 'app-destino',
   templateUrl: './destino.component.html',
@@ -54,10 +61,21 @@ export class DestinoComponent implements OnInit, OnChanges {
   private carregandoSegmentoDe = new Set<string>();
 
   formUnico: FormGroup;
-  // Uma entrada por linha de origem selecionada — usado no modo Múltiplo (cada
-  // linha edita seu próprio segmento) e também como base pro modo Único
-  // (natureza/valor/histórico já vêm calculados de origem pros dois modos).
+  // Único: continua 1:1 com a origem, 1 segmento replicado pra todas as
+  // linhas (sem split) — ver avancarEtapa().
   linhasDestino: LinhaDestino[] = [];
+
+  // Múltiplo: 1 grupo por linha de Origem (cada grupo = 1 rateio de Crédito
+  // real selecionado), e cada grupo pode ter N destinos (pedido do usuário
+  // em 2026-10-14: "quando escolho múltiplos destinos... não sabemos
+  // quantos destinos pode ter" — mesma necessidade que já existia no Manual,
+  // 2026-09-02, só que aqui aplicada por CRÉDITO real, não por origem
+  // digitada). A soma dos destinos de um grupo precisa bater exatamente com
+  // o valor do crédito original (ver grupoBalanceado()). Quando um grupo
+  // fica com só 1 destino (não dividido), o resultado é idêntico ao 1:1 de
+  // antes — `montarComparativo()` (functions/comparativo.ts) já sabe casar N
+  // destinos com a mesma origem.
+  gruposDestino: GrupoDestino[] = [];
 
   constructor(private fb: FormBuilder, private servico: ServiceBpmService) {
     this.formUnico = this.fb.group({
@@ -110,6 +128,7 @@ export class DestinoComponent implements OnInit, OnChanges {
   ngOnInit(): void {
     this.carregarListas();
     this.inicializarLinhasDestino();
+    this.inicializarGruposDestino();
     this.restaurarModoEFormUnico();
 
     // Filtro em cascata do segmento (Conta -> Projeto -> CC+Fase, ver
@@ -141,6 +160,7 @@ export class DestinoComponent implements OnInit, OnChanges {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['assinaturaOrigem'] && !changes['assinaturaOrigem'].firstChange) {
       this.inicializarLinhasDestino();
+      this.inicializarGruposDestino();
     }
   }
 
@@ -196,6 +216,108 @@ export class DestinoComponent implements OnInit, OnChanges {
         }
       }
     });
+  }
+
+  // Monta os grupos do modo Múltiplo — 1 por linha de Origem (rateio de
+  // Crédito), com N destinos cada (ver GrupoDestino acima). `linhasDestino`
+  // salvo pode ter mais de 1 entrada com o MESMO `lancamento` quando um
+  // grupo já foi dividido numa sessão anterior (STC devolvida) — agrupa por
+  // essa chave antes de distribuir.
+  private inicializarGruposDestino(): void {
+    const salvas = Array.isArray(this.dadosFormulario.linhasDestino)
+      ? this.dadosFormulario.linhasDestino
+      : [];
+    const salvasPorLancamento = new Map<string, LinhaDestino[]>();
+    salvas.forEach((l: LinhaDestino) => {
+      const grupo = salvasPorLancamento.get(l.lancamento ?? '');
+      if (grupo) {
+        grupo.push(l);
+      } else {
+        salvasPorLancamento.set(l.lancamento ?? '', [l]);
+      }
+    });
+
+    this.gruposDestino = this.linhasOrigem.map((origem) => {
+      const historico = montarHistoricoDestino(this.dadosFormulario.numeroStc, origem.historico);
+      const salvasDoGrupo = salvasPorLancamento.get(origem.lancamento ?? '') ?? [];
+      const destinos: LinhaDestino[] = (salvasDoGrupo.length ? salvasDoGrupo : [undefined]).map(
+        (salva?: LinhaDestino) => ({
+          lancamento: origem.lancamento,
+          numLct: origem.numLct,
+          natureza: origem.natureza,
+          valor: salva ? salva.valor : origem.valor,
+          historico,
+          ctaRed: salva?.ctaRed,
+          desCta: salva?.desCta,
+          codCcu: salva?.codCcu,
+          desCcu: salva?.desCcu,
+          numPrj: salva?.numPrj,
+          nomPrj: salva?.nomPrj,
+          codFpj: salva?.codFpj,
+          desFpj: salva?.desFpj,
+          gestor: salva?.gestor,
+        })
+      );
+      destinos.forEach((d) => {
+        if (d.ctaRed) {
+          this.garantirProjetosCarregados(d.ctaRed);
+          if (d.numPrj) {
+            this.garantirSegmentoCarregado(d.ctaRed, d.numPrj);
+          }
+        }
+      });
+      return { origem, destinos };
+    });
+  }
+
+  // Adiciona/remove destinos de um grupo (split 1 crédito -> N destinos,
+  // pedido do usuário em 2026-10-14, mesmo padrão já usado no Manual pro
+  // split 1 origem -> N destinos em 2026-09-02) — nunca deixa zerar
+  // (sempre pelo menos 1 destino por grupo).
+  adicionarDestino(grupo: GrupoDestino): void {
+    grupo.destinos.push({
+      lancamento: grupo.origem.lancamento,
+      numLct: grupo.origem.numLct,
+      natureza: grupo.origem.natureza,
+      valor: undefined,
+      historico: montarHistoricoDestino(this.dadosFormulario.numeroStc, grupo.origem.historico),
+    });
+  }
+
+  removerDestino(grupo: GrupoDestino, index: number): void {
+    if (grupo.destinos.length > 1) {
+      grupo.destinos.splice(index, 1);
+    }
+  }
+
+  totalDestinos(grupo: GrupoDestino): number {
+    return grupo.destinos.reduce((total, d) => total + (d.valor ?? 0), 0);
+  }
+
+  saldoGrupo(grupo: GrupoDestino): number {
+    return (grupo.origem.valor ?? 0) - this.totalDestinos(grupo);
+  }
+
+  // Tolerância de 0,005 pra ponto flutuante — mesmo padrão de
+  // OrigemDestinoManualComponent.destinosBalanceados.
+  grupoBalanceado(grupo: GrupoDestino): boolean {
+    return Math.abs(this.saldoGrupo(grupo)) < 0.005;
+  }
+
+  todosGruposBalanceados(): boolean {
+    return this.gruposDestino.every((g) => this.grupoBalanceado(g));
+  }
+
+  // Mesmo padrão do Manual (OrigemDestinoManualComponent): o bloqueio de
+  // verdade é o botão "Avançar" desabilitado, não só a mensagem no clique —
+  // confirmado necessário lá em 2026-09-02 (usuário reportou conseguir
+  // avançar mesmo com saldo errado, usando só a mensagem). Usado em
+  // destino.component.html pro modo Múltiplo.
+  get multiploBloqueado(): boolean {
+    const incompleta = this.gruposDestino.some((g) =>
+      g.destinos.some((l) => !l.ctaRed || !l.codCcu || !l.numPrj || !l.codFpj || !l.valor)
+    );
+    return incompleta || !this.todosGruposBalanceados();
   }
 
   // Restaura o modo (Único/Múltiplo) e, no Único, o segmento único salvo
@@ -521,17 +643,35 @@ export class DestinoComponent implements OnInit, OnChanges {
       this.servico.dadosFormulario.codFpj = segmento.codFpj;
       this.servico.dadosFormulario.desFpj = segmento.desFpj;
     } else {
-      const incompleta = this.linhasDestino.some(
-        (l) => !l.ctaRed || !l.codCcu || !l.numPrj || !l.codFpj
+      const incompleta = this.gruposDestino.some((g) =>
+        g.destinos.some((l) => !l.ctaRed || !l.codCcu || !l.numPrj || !l.codFpj || !l.valor)
       );
       if (incompleta) {
         this.enviaMensagem.emit({
           tipo: 3,
-          mensagem: 'Preencha o segmento contábil de destino em todas as linhas.',
+          mensagem: 'Preencha o segmento contábil e o valor de destino em todas as linhas.',
         });
         return;
       }
-      linhasFinais = this.linhasDestino.map((linha) => this.resolverDescricoes(linha));
+      // Split 1 crédito -> N destinos (pedido do usuário em 2026-10-14): a
+      // soma dos destinos de cada grupo precisa bater exatamente com o
+      // valor do crédito original — "o saldo tem que ser igual", mesma
+      // regra já confirmada no split do Manual (02/09).
+      if (!this.todosGruposBalanceados()) {
+        const grupoDivergente = this.gruposDestino.find((g) => !this.grupoBalanceado(g));
+        this.enviaMensagem.emit({
+          tipo: 3,
+          mensagem: `A soma dos destinos do lançamento ${grupoDivergente?.origem.lancamento} (R$ ${this.totalDestinos(
+            grupoDivergente!
+          ).toFixed(2)}) precisa ser igual ao valor do crédito original (R$ ${(
+            grupoDivergente?.origem.valor ?? 0
+          ).toFixed(2)}).`,
+        });
+        return;
+      }
+      linhasFinais = this.gruposDestino.flatMap((g) =>
+        g.destinos.map((linha) => this.resolverDescricoes(linha))
+      );
     }
 
     // Fila de aprovação por gestor de destino (RN046/049/050, implementado em

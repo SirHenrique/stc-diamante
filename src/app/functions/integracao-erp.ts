@@ -59,29 +59,61 @@ function montarParDeRateios(l: LinhaComparativo): {
   return { rateioDestino, rateioOrigemEstorno, debCreDestino, debCreOrigem, valor };
 }
 
-// Por Lote (tipo "L"): 1 lançamento por LINHA do comparativo (1:1 com
-// LinhaComparativo) — cabeçalho `ctaDeb`/`ctaCre` (E640LCT) decorre direto
-// do par: é a conta cujo rateio ficou "D"/"C" respectivamente, não é uma
-// regra separada.
+// Por Lote (tipo "L"): 1 lançamento NOVO por LANÇAMENTO REAL original
+// (agrupado por `origem.numLct`), não mais por linha — CORRIGIDO em
+// 2026-10-14. Cada linha do comparativo já é só um rateio de CRÉDITO
+// selecionado (`achatarRateiosSelecionados()`, functions/lancamentos.ts —
+// o Débito nunca chega aqui como linha própria, ele é só o estorno
+// automático de cada Crédito, via `montarParDeRateios`). Antes desta
+// correção, cada rateio (inclusive o de Débito, quando também virava linha)
+// gerava seu PRÓPRIO lançamento novo separado — pra um lançamento real com,
+// por exemplo, 1 Débito + 1 Crédito, isso mandava 2 lançamentos novos pro
+// Sapiens, cada um incompleto (só 2 dos 4 rateios) — causa real do bug
+// reportado pelo cliente (STC 702, lançamento 225024: `dados` saía vazio,
+// porque os 2 rateios tinham Centro de Custo "99999999", removido pelo
+// filtro abaixo que existia antes — ver nota em
+// construirLancamentosIntegracao). Agora: todos os Créditos do MESMO
+// lançamento original (mesmo `numLct`) entram juntos num lançamento novo só,
+// com todos os pares Destino+Origem-estorno dentro de `rateios[]` — mesmo
+// padrão já usado em construirLancamentoManual() (abaixo).
 //
-// DECISÃO NÃO CONFIRMADA (assumida por falta de informação — sinalizar pro
-// usuário antes de considerar definitivo): mesmo no modo Único onde várias
-// linhas de origem compartilham o mesmo destino, NÃO consolida múltiplas
-// origens num único lançamento, porque `ctaDeb`/`ctaCre` são por PAR
-// origem/destino (contas de origem podem divergir entre linhas mesmo com
-// destino igual) e não há informação suficiente pra saber se o usuário quer
-// consolidar por conta-de-origem distinta ou manter 1:1 com a linha.
+// Cabeçalho `ctaDeb`/`ctaCre` (E640LCT) — mesma ressalva já aceita no
+// Manual: com N créditos de contas diferentes no mesmo lançamento, usa a
+// conta do PRIMEIRO crédito do grupo como valor do cabeçalho; os rateios
+// reais dentro de `rateios[]` continuam corretos cada um com sua própria
+// conta, independente disso.
 function construirLancamentosPorLote(
   linhas: LinhaComparativo[],
   codEmp: string | undefined,
   codFil: string | undefined
 ): LancamentoIntegracao[] {
-  return linhas.map((l) => {
-    const origem = l.origem;
-    const destino = l.destino!;
-    const { rateioDestino, rateioOrigemEstorno, debCreDestino, valor } = montarParDeRateios(l);
-    const ctaDeb = (debCreDestino === 'D' ? destino.ctaRed : origem.ctaRed) ?? '';
-    const ctaCre = (debCreDestino === 'C' ? destino.ctaRed : origem.ctaRed) ?? '';
+  const grupos = new Map<string, LinhaComparativo[]>();
+  linhas.forEach((l) => {
+    const chave = l.origem.numLct ?? l.origem.lancamento ?? '';
+    const grupo = grupos.get(chave);
+    if (grupo) {
+      grupo.push(l);
+    } else {
+      grupos.set(chave, [l]);
+    }
+  });
+
+  return Array.from(grupos.values()).map((grupo) => {
+    const origem = grupo[0].origem;
+    const rateios: RateioIntegracao[] = [];
+    let vlrLct = 0;
+    grupo.forEach((l) => {
+      const { rateioDestino, rateioOrigemEstorno, valor } = montarParDeRateios(l);
+      rateios.push(rateioDestino, rateioOrigemEstorno);
+      vlrLct += valor;
+    });
+
+    const primeiro = montarParDeRateios(grupo[0]);
+    const destinoPrimeiro = grupo[0].destino!;
+    const ctaDeb =
+      (primeiro.debCreDestino === 'D' ? destinoPrimeiro.ctaRed : origem.ctaRed) ?? '';
+    const ctaCre =
+      (primeiro.debCreDestino === 'C' ? destinoPrimeiro.ctaRed : origem.ctaRed) ?? '';
 
     return {
       codEmp: codEmp ?? '',
@@ -92,9 +124,9 @@ function construirLancamentosPorLote(
       datLct: origem.datLct ?? '',
       ctaDeb,
       ctaCre,
-      vlrLct: valor,
-      cplLct: destino.historico ?? origem.historico ?? '',
-      rateios: [rateioDestino, rateioOrigemEstorno],
+      vlrLct,
+      cplLct: destinoPrimeiro.historico ?? origem.historico ?? '',
+      rateios,
     };
   });
 }
@@ -165,21 +197,28 @@ function construirLancamentoManual(
 }
 
 // Monta o array `dados` do port `postLancamentos` (ver ENDPOINTS.txt) a
-// partir do comparativo Origem×Destino da STC — Por Lote gera 1 lançamento
-// por linha, Manual consolida tudo em 1 lançamento só (ver funções acima).
+// partir do comparativo Origem×Destino da STC — Por Lote agrupa por
+// lançamento original (um lançamento novo por numLct), Manual consolida
+// tudo em 1 lançamento só (ver funções acima).
 export function construirLancamentosIntegracao(
   linhas: LinhaComparativo[],
   tipo: 'M' | 'L',
   codEmp: string | undefined,
   codFil: string | undefined
 ): LancamentoIntegracao[] {
-  const linhasValidas = linhas
-    .filter((l) => !!l.destino)
-    // Rateio com Centro de Custo "99999999" não conta pra integração
-    // (pedido do usuário em 2026-08-31) — continua aparecendo/selecionável
-    // normalmente na tela de Origem, só é ignorado aqui na montagem do
-    // postLancamentos.
-    .filter((l) => l.origem.codCcu !== '99999999');
+  // REMOVIDO em 2026-10-14 o filtro `l.origem.codCcu !== '99999999'`
+  // ("rateio com CC 99999999 não conta pra integração", pedido do usuário em
+  // 2026-08-31): causava o bug real reportado pelo cliente — um lançamento
+  // cujos rateios usam só CC "99999999" (ex.: reclassificação bancária/
+  // tesouraria, sem Centro de Custo aplicável) tinha TODAS as linhas
+  // removidas por esse filtro, chegando vazio (`dados: []`) no
+  // postLancamentos, mesmo depois de passar por todas as aprovações.
+  // Confirmado pelo usuário: Centro de Custo 99999999 é um valor de destino
+  // legítimo, não deveria nunca bloquear a integração — a garantia real é
+  // outra (o Débito sempre descontar a origem), já assegurada antes disso,
+  // em achatarRateiosSelecionados() (functions/lancamentos.ts), que só deixa
+  // rateios de CRÉDITO virarem linha de Origem.
+  const linhasValidas = linhas.filter((l) => !!l.destino);
 
   return tipo === 'M'
     ? construirLancamentoManual(linhasValidas, codEmp, codFil)

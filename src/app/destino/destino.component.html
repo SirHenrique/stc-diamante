@@ -177,107 +177,155 @@
 
     <p-card header="Destino Múltiplo" *ngIf="modo === 'Multiplo'">
       <p class="text-sm text-color-secondary mt-0 mb-3">
-        Cada rateio pode ir para um destino diferente — inclusive rateios de um mesmo lançamento.
+        Cada rateio de crédito pode ir para um ou mais destinos — use "Adicionar Destino" pra
+        dividir o valor de um crédito entre várias contas/CCs. A soma dos destinos de cada
+        lançamento precisa bater com o valor do crédito original.
       </p>
-      <div class="overflow-x-auto">
-      <p-table [value]="linhasDestino" dataKey="lancamento">
+
+      <p-card
+        *ngFor="let grupo of gruposDestino"
+        styleClass="mb-3 border-1 border-300"
+      >
         <ng-template pTemplate="header">
-          <tr>
-            <th>Lançamento</th>
-            <th>Conta Destino</th>
-            <th>Centro de Custo Destino</th>
-            <th>Projeto Destino</th>
-            <th>Fase Destino</th>
-            <th>Natureza</th>
-            <th>Valor</th>
-            <th>Aprovador</th>
-          </tr>
+          <div class="flex align-items-center justify-content-between px-3 pt-3">
+            <span class="font-bold">Lançamento {{ grupo.origem.lancamento }}</span>
+            <span class="text-color-secondary">Valor do Crédito: R$ {{ grupo.origem.valor | moeda }}</span>
+          </div>
         </ng-template>
-        <ng-template pTemplate="body" let-linha>
-          <tr>
-            <td>{{ linha.lancamento }}</td>
-            <td>
-              <p-dropdown [appendTo]="'body'" [virtualScroll]="true" [virtualScrollItemSize]="38"
-                [options]="contas"
-                [ngModel]="linha.ctaRed"
-                (ngModelChange)="aoTrocarContaLinha(linha, $event)"
-                optionValue="ctaRed"
-                filterBy="ctaRed,desCta"
-                [filter]="true"
-                placeholder="Conta"
-                [autoDisplayFirst]="false"
-              >
-                <ng-template let-c pTemplate="item">{{ c.ctaRed }} - {{ c.desCta }}</ng-template>
-                <ng-template let-c pTemplate="selectedItem"
-                  >{{ c.ctaRed }} - {{ c.desCta }}</ng-template
-                >
-              </p-dropdown>
-            </td>
-            <td>
-              <span class="flex align-items-center gap-2">
-                <p-dropdown [appendTo]="'body'" [virtualScroll]="true" [virtualScrollItemSize]="38"
-                  [disabled]="!segmentoCarregado(linha.ctaRed, linha.numPrj)"
-                  [options]="centrosCustoDoSegmento(linha.ctaRed, linha.numPrj)"
-                  [(ngModel)]="linha.codCcu"
-                  optionValue="codCcu"
-                  filterBy="codCcu,desCcu"
-                  [filter]="true"
-                  [placeholder]="placeholderCC(linha.ctaRed, linha.numPrj)"
-                  [autoDisplayFirst]="false"
-                >
-                  <ng-template let-c pTemplate="item">{{ c.codCcu }} - {{ c.desCcu }}</ng-template>
-                  <ng-template let-c pTemplate="selectedItem"
-                    >{{ c.codCcu }} - {{ c.desCcu }}</ng-template
+
+        <div class="overflow-x-auto">
+          <p-table [value]="grupo.destinos">
+            <ng-template pTemplate="header">
+              <tr>
+                <th>Conta Destino</th>
+                <th>Centro de Custo Destino</th>
+                <th>Projeto Destino</th>
+                <th>Fase Destino</th>
+                <th>Natureza</th>
+                <th style="width: 10rem">Valor</th>
+                <th>Aprovador</th>
+                <th style="width: 3rem"></th>
+              </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-linha let-i="rowIndex">
+              <tr>
+                <td>
+                  <p-dropdown [appendTo]="'body'" [virtualScroll]="true" [virtualScrollItemSize]="38"
+                    [options]="contas"
+                    [ngModel]="linha.ctaRed"
+                    (ngModelChange)="aoTrocarContaLinha(linha, $event)"
+                    optionValue="ctaRed"
+                    filterBy="ctaRed,desCta"
+                    [filter]="true"
+                    placeholder="Conta"
+                    [autoDisplayFirst]="false"
                   >
-                </p-dropdown>
-                <i class="pi pi-spinner pi-spin text-color-secondary" *ngIf="carregandoSegmento(linha.ctaRed, linha.numPrj)"></i>
-              </span>
-            </td>
-            <td>
-              <span class="flex align-items-center gap-2">
-                <p-dropdown [appendTo]="'body'" [virtualScroll]="true" [virtualScrollItemSize]="38"
-                  [disabled]="!projetosCarregados(linha.ctaRed)"
-                  [options]="projetosDaConta(linha.ctaRed)"
-                  [ngModel]="linha.numPrj"
-                  (ngModelChange)="aoTrocarProjetoLinha(linha, $event)"
-                  optionValue="numPrj"
-                  filterBy="numPrj,nomPrj"
-                  [filter]="true"
-                  [placeholder]="placeholderProjeto(linha.ctaRed)"
-                  [autoDisplayFirst]="false"
-                >
-                  <ng-template let-p pTemplate="item">{{ p.numPrj }} - {{ p.nomPrj }}</ng-template>
-                  <ng-template let-p pTemplate="selectedItem"
-                    >{{ p.numPrj }} - {{ p.nomPrj }}</ng-template
+                    <ng-template let-c pTemplate="item">{{ c.ctaRed }} - {{ c.desCta }}</ng-template>
+                    <ng-template let-c pTemplate="selectedItem"
+                      >{{ c.ctaRed }} - {{ c.desCta }}</ng-template
+                    >
+                  </p-dropdown>
+                </td>
+                <td>
+                  <span class="flex align-items-center gap-2">
+                    <p-dropdown [appendTo]="'body'" [virtualScroll]="true" [virtualScrollItemSize]="38"
+                      [disabled]="!segmentoCarregado(linha.ctaRed, linha.numPrj)"
+                      [options]="centrosCustoDoSegmento(linha.ctaRed, linha.numPrj)"
+                      [(ngModel)]="linha.codCcu"
+                      optionValue="codCcu"
+                      filterBy="codCcu,desCcu"
+                      [filter]="true"
+                      [placeholder]="placeholderCC(linha.ctaRed, linha.numPrj)"
+                      [autoDisplayFirst]="false"
+                    >
+                      <ng-template let-c pTemplate="item">{{ c.codCcu }} - {{ c.desCcu }}</ng-template>
+                      <ng-template let-c pTemplate="selectedItem"
+                        >{{ c.codCcu }} - {{ c.desCcu }}</ng-template
+                      >
+                    </p-dropdown>
+                    <i class="pi pi-spinner pi-spin text-color-secondary" *ngIf="carregandoSegmento(linha.ctaRed, linha.numPrj)"></i>
+                  </span>
+                </td>
+                <td>
+                  <span class="flex align-items-center gap-2">
+                    <p-dropdown [appendTo]="'body'" [virtualScroll]="true" [virtualScrollItemSize]="38"
+                      [disabled]="!projetosCarregados(linha.ctaRed)"
+                      [options]="projetosDaConta(linha.ctaRed)"
+                      [ngModel]="linha.numPrj"
+                      (ngModelChange)="aoTrocarProjetoLinha(linha, $event)"
+                      optionValue="numPrj"
+                      filterBy="numPrj,nomPrj"
+                      [filter]="true"
+                      [placeholder]="placeholderProjeto(linha.ctaRed)"
+                      [autoDisplayFirst]="false"
+                    >
+                      <ng-template let-p pTemplate="item">{{ p.numPrj }} - {{ p.nomPrj }}</ng-template>
+                      <ng-template let-p pTemplate="selectedItem"
+                        >{{ p.numPrj }} - {{ p.nomPrj }}</ng-template
+                      >
+                    </p-dropdown>
+                    <i class="pi pi-spinner pi-spin text-color-secondary" *ngIf="carregandoProjetos(linha.ctaRed)"></i>
+                  </span>
+                </td>
+                <td>
+                  <p-dropdown [appendTo]="'body'"
+                    [disabled]="!segmentoCarregado(linha.ctaRed, linha.numPrj)"
+                    [options]="fasesDoSegmento(linha.ctaRed, linha.numPrj)"
+                    [(ngModel)]="linha.codFpj"
+                    optionValue="codFpj"
+                    filterBy="codFpj,desFpj"
+                    [filter]="true"
+                    [placeholder]="placeholderFase(linha.ctaRed, linha.numPrj)"
+                    [autoDisplayFirst]="false"
                   >
-                </p-dropdown>
-                <i class="pi pi-spinner pi-spin text-color-secondary" *ngIf="carregandoProjetos(linha.ctaRed)"></i>
-              </span>
-            </td>
-            <td>
-              <p-dropdown [appendTo]="'body'"
-                [disabled]="!segmentoCarregado(linha.ctaRed, linha.numPrj)"
-                [options]="fasesDoSegmento(linha.ctaRed, linha.numPrj)"
-                [(ngModel)]="linha.codFpj"
-                optionValue="codFpj"
-                filterBy="codFpj,desFpj"
-                [filter]="true"
-                [placeholder]="placeholderFase(linha.ctaRed, linha.numPrj)"
-                [autoDisplayFirst]="false"
-              >
-                <ng-template let-f pTemplate="item">{{ f.codFpj }} - {{ f.desFpj }}</ng-template>
-                <ng-template let-f pTemplate="selectedItem"
-                  >{{ f.codFpj }} - {{ f.desFpj }}</ng-template
-                >
-              </p-dropdown>
-            </td>
-            <td>{{ linha.natureza }}</td>
-            <td>R$ {{ linha.valor | moeda }}</td>
-            <td>{{ gestorDaLinha(linha) || '-' }}</td>
-          </tr>
-        </ng-template>
-      </p-table>
-      </div>
+                    <ng-template let-f pTemplate="item">{{ f.codFpj }} - {{ f.desFpj }}</ng-template>
+                    <ng-template let-f pTemplate="selectedItem"
+                      >{{ f.codFpj }} - {{ f.desFpj }}</ng-template
+                    >
+                  </p-dropdown>
+                </td>
+                <td>{{ linha.natureza }}</td>
+                <td>
+                  <p-inputNumber
+                    [(ngModel)]="linha.valor"
+                    mode="currency"
+                    currency="BRL"
+                    locale="pt-BR"
+                    [minFractionDigits]="2"
+                  ></p-inputNumber>
+                </td>
+                <td>{{ gestorDaLinha(linha) || '-' }}</td>
+                <td>
+                  <p-button
+                    icon="pi pi-trash"
+                    styleClass="p-button-text p-button-danger p-button-rounded"
+                    [disabled]="grupo.destinos.length <= 1"
+                    (click)="removerDestino(grupo, i)"
+                  ></p-button>
+                </td>
+              </tr>
+            </ng-template>
+          </p-table>
+        </div>
+
+        <div class="flex align-items-center justify-content-between mt-3">
+          <p-button
+            label="Adicionar Destino"
+            icon="pi pi-plus"
+            styleClass="p-button-text p-button-sm"
+            (click)="adicionarDestino(grupo)"
+          ></p-button>
+          <p-message
+            [severity]="grupoBalanceado(grupo) ? 'success' : 'warn'"
+            [text]="
+              'Total dos destinos: R$ ' +
+              (totalDestinos(grupo) | moeda) +
+              ' / Crédito: R$ ' +
+              (grupo.origem.valor | moeda)
+            "
+          ></p-message>
+        </div>
+      </p-card>
     </p-card>
   </div>
 
@@ -316,6 +364,7 @@
     label="Avançar para Resumo"
     icon="pi pi-arrow-right"
     iconPos="right"
+    [disabled]="modo === 'Multiplo' && multiploBloqueado"
     (click)="avancarEtapa()"
   ></p-button>
 </div>
